@@ -1,0 +1,549 @@
+---
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const photosDir = join(process.cwd(), 'public/piante');
+const files = readdirSync(photosDir)
+  .filter((f: string) => f.endsWith('.jpg'))
+  .sort();
+
+const MONTHS = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+
+function parse(filename: string) {
+  const base = filename.replace('.jpg', '');
+  const parts = base.split('_');
+  const dateIdx = parts.findIndex(p => /^\d{4}-\d{2}-\d{2}$/.test(p));
+  const nameParts = parts.slice(0, dateIdx).join(' ').split('-');
+  const name = nameParts
+    .map((w, i) => i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)
+    .join(' ');
+  const date = parts[dateIdx];
+  const [y, m, d] = date.split('-');
+  const dateFormatted = `${parseInt(d)} ${MONTHS[parseInt(m) - 1]} ${y}`;
+  return { name, date, dateFormatted };
+}
+
+const allPhotos = files.map((f: string) => ({ file: f, ...parse(f) }));
+
+// Raggruppa per nome specie, ordina ogni gruppo dal più vecchio al più recente
+const groupMap = new Map<string, typeof allPhotos>();
+for (const p of allPhotos) {
+  if (!groupMap.has(p.name)) groupMap.set(p.name, []);
+  groupMap.get(p.name)!.push(p);
+}
+
+const plants = [...groupMap.entries()].map(([name, photos]) => {
+  const sorted = [...photos].sort((a, b) => a.date.localeCompare(b.date));
+  return { name, photos: sorted, latest: sorted[sorted.length - 1] };
+});
+
+// Ordina la griglia: piante con foto più recente prima
+plants.sort((a, b) => b.latest.date.localeCompare(a.latest.date));
+
+const totalPhotos = allPhotos.length;
+const totalSpecies = plants.length;
+
+// Dati serializzati per il lightbox JS
+const plantDataJson = JSON.stringify(
+  Object.fromEntries(plants.map(p => [p.name, p.photos]))
+);
+---
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Erbario</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <a href="#main" class="skip-link">Salta al contenuto</a>
+
+  <header>
+    <div class="header-inner">
+      <div class="header-title">
+        <span class="label">Erbario personale</span>
+        <h1>Collezione di piante</h1>
+      </div>
+      <div class="header-stats">
+        <div class="stat">
+          <span class="stat-num">{totalPhotos}</span>
+          <span class="stat-label">foto</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num">{totalSpecies}</span>
+          <span class="stat-label">specie</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="grid">
+      {plants.map(plant => (
+        <article
+          class="card"
+          role="button"
+          tabindex="0"
+          aria-label={`${plant.name} — ${plant.photos.length} foto`}
+          data-plant={plant.name}
+        >
+          <div class="card-img">
+            <img
+              src={`/piante/${plant.latest.file}`}
+              alt={plant.name}
+              loading="lazy"
+              decoding="async"
+            />
+            {plant.photos.length > 1 && (
+              <span class="badge" aria-hidden="true">{plant.photos.length}</span>
+            )}
+          </div>
+          <div class="card-info">
+            <p class="plant-genus">{plant.name.split(' ')[0]}</p>
+            {plant.name.split(' ').slice(1).join(' ') && (
+              <p class="plant-epithet">{plant.name.split(' ').slice(1).join(' ')}</p>
+            )}
+            <time class="plant-date" datetime={plant.latest.date}>{plant.latest.dateFormatted}</time>
+          </div>
+        </article>
+      ))}
+    </div>
+  </main>
+
+  <!-- Lightbox -->
+  <dialog id="lightbox" aria-label="Visualizzatore foto">
+    <button class="lb-close" id="lb-close" aria-label="Chiudi">✕</button>
+    <button class="lb-nav lb-prev" id="lb-prev" aria-label="Foto precedente">&#8249;</button>
+    <div class="lb-photo-wrap">
+      <img id="lb-img" src="" alt="" />
+    </div>
+    <button class="lb-nav lb-next" id="lb-next" aria-label="Foto successiva">&#8250;</button>
+    <div class="lb-caption">
+      <span id="lb-name" class="lb-plant-name"></span>
+      <span class="lb-sep">·</span>
+      <time id="lb-date" class="lb-plant-date"></time>
+      <span id="lb-counter" class="lb-counter"></span>
+    </div>
+  </dialog>
+
+  <!-- Dati piante per JS -->
+  <script id="plant-data" type="application/json" is:inline set:html={plantDataJson}></script>
+
+</body>
+</html>
+
+<script>
+const plantData: Record<string, { file: string; name: string; date: string; dateFormatted: string }[]> =
+  JSON.parse(document.getElementById('plant-data')!.textContent!);
+
+const dialog = document.getElementById('lightbox') as HTMLDialogElement;
+const lbImg = document.getElementById('lb-img') as HTMLImageElement;
+const lbName = document.getElementById('lb-name')!;
+const lbDate = document.getElementById('lb-date')!;
+const lbCounter = document.getElementById('lb-counter')!;
+const lbPrev = document.getElementById('lb-prev') as HTMLButtonElement;
+const lbNext = document.getElementById('lb-next') as HTMLButtonElement;
+
+let currentPhotos: typeof plantData[string] = [];
+let currentIdx = 0;
+
+function renderLightbox() {
+  const photo = currentPhotos[currentIdx];
+  lbImg.src = `/piante/${photo.file}`;
+  lbImg.alt = photo.name;
+  lbName.textContent = photo.name;
+  lbDate.setAttribute('datetime', photo.date);
+  lbDate.textContent = photo.dateFormatted;
+  lbCounter.textContent = currentPhotos.length > 1 ? `${currentIdx + 1} / ${currentPhotos.length}` : '';
+  lbPrev.disabled = currentIdx === 0;
+  lbNext.disabled = currentIdx === currentPhotos.length - 1;
+}
+
+function openLightbox(plantName: string, photoIdx = -1) {
+  currentPhotos = plantData[plantName];
+  currentIdx = photoIdx >= 0 ? photoIdx : currentPhotos.length - 1;
+  renderLightbox();
+  dialog.showModal();
+  lbImg.focus();
+}
+
+// Apri dal click sulle card
+document.querySelectorAll<HTMLElement>('[data-plant]').forEach(card => {
+  card.addEventListener('click', () => openLightbox(card.dataset.plant!));
+  card.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openLightbox(card.dataset.plant!);
+    }
+  });
+});
+
+// Navigazione
+lbPrev.addEventListener('click', () => { if (currentIdx > 0) { currentIdx--; renderLightbox(); } });
+lbNext.addEventListener('click', () => { if (currentIdx < currentPhotos.length - 1) { currentIdx++; renderLightbox(); } });
+document.getElementById('lb-close')!.addEventListener('click', () => dialog.close());
+
+// Click sull'area scura intorno alla foto chiude (non sull'immagine)
+document.querySelector<HTMLElement>('.lb-photo-wrap')!.addEventListener('click', e => {
+  if (e.target === e.currentTarget) dialog.close();
+});
+
+// Stoppa la propagazione sui bottoni per evitare chiusure accidentali
+[lbPrev, lbNext, document.getElementById('lb-close')!].forEach(el => {
+  el.addEventListener('click', e => e.stopPropagation());
+});
+
+// Tastiera
+dialog.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') { e.preventDefault(); if (currentIdx > 0) { currentIdx--; renderLightbox(); } }
+  if (e.key === 'ArrowRight') { e.preventDefault(); if (currentIdx < currentPhotos.length - 1) { currentIdx++; renderLightbox(); } }
+});
+</script>
+
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root {
+    --bg: #0b1410;
+    --surface: #131f18;
+    --border: rgba(255,255,255,0.07);
+    --text: #e4ede6;
+    --text-muted: rgba(228,237,230,0.45);
+    --accent: #72b87a;
+    --radius: 10px;
+    --font-serif: 'EB Garamond', Georgia, serif;
+    --font-sans: 'Inter', system-ui, sans-serif;
+  }
+
+  html { background: var(--bg); color: var(--text); }
+
+  body {
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+
+  .skip-link {
+    position: absolute; top: -100%; left: 13px;
+    padding: 8px 21px; background: var(--accent); color: #0b1410;
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+    z-index: 9999; transition: top 0.2s; text-decoration: none;
+  }
+  .skip-link:focus { top: 13px; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 32px 24px;
+  }
+
+  .header-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .label {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 400;
+    font-style: italic;
+    line-height: 1;
+    color: var(--text);
+    text-wrap: balance;
+  }
+
+  .header-stats {
+    display: flex;
+    gap: 32px;
+    flex-shrink: 0;
+    padding-bottom: 4px;
+  }
+
+  .stat { text-align: right; }
+
+  .stat-num {
+    display: block;
+    font-family: var(--font-serif);
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .stat-label {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* ── Grid ── */
+  main {
+    padding: 32px 24px 64px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .card:hover {
+    border-color: rgba(114,184,122,0.35);
+    transform: translateY(-2px);
+  }
+
+  .card-img {
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: #0b1410;
+    position: relative;
+  }
+
+  .card-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.4s ease;
+  }
+
+  .card:hover .card-img img {
+    transform: scale(1.04);
+  }
+
+  .badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(11,20,16,0.75);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    letter-spacing: 0.5px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    line-height: 18px;
+  }
+
+  .card-info {
+    padding: 12px 14px 14px;
+  }
+
+  .plant-genus {
+    font-family: var(--font-serif);
+    font-size: 1rem;
+    font-style: italic;
+    color: var(--text);
+    line-height: 1.2;
+  }
+
+  .plant-epithet {
+    font-family: var(--font-serif);
+    font-size: 0.65rem;
+    font-style: normal;
+    font-weight: 500;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .plant-date {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 6px;
+  }
+
+  /* ── Lightbox fullscreen ── */
+  dialog {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.96);
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    overflow: hidden;
+    outline: none;
+    z-index: 9999;
+  }
+
+  dialog[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  dialog::backdrop { display: none; }
+
+  .lb-close {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+    z-index: 10;
+  }
+  .lb-close:hover { background: rgba(255,255,255,0.2); }
+
+  .lb-photo-wrap {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 56px 80px;
+  }
+
+  .lb-photo-wrap img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+    user-select: none;
+    image-rendering: high-quality;
+  }
+
+  .lb-nav {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255,255,255,0.08);
+    border: none;
+    color: #fff;
+    font-size: 36px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, opacity 0.15s;
+    line-height: 1;
+    z-index: 10;
+  }
+  .lb-prev { left: 16px; }
+  .lb-next { right: 16px; }
+  .lb-nav:hover:not(:disabled) { background: rgba(255,255,255,0.18); }
+  .lb-nav:disabled { opacity: 0.15; cursor: default; }
+
+  .lb-caption {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 24px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    z-index: 10;
+  }
+
+  .lb-plant-name {
+    font-family: var(--font-serif);
+    font-size: 1.1rem;
+    font-style: italic;
+    color: #fff;
+  }
+
+  .lb-sep { color: rgba(255,255,255,0.4); }
+
+  .lb-plant-date {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+  }
+
+  .lb-counter {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    margin-left: auto;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    header { padding: 24px 16px; }
+    .header-inner { flex-direction: column; align-items: flex-start; }
+    .header-stats { padding-bottom: 0; }
+    main { padding: 24px 16px 48px; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+    .lb-photo-wrap { padding: 64px 56px; }
+    .lb-nav { width: 44px; height: 44px; font-size: 28px; }
+    .lb-prev { left: 8px; }
+    .lb-next { right: 8px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  a, button, [role="button"] { touch-action: manipulation; }
+</style>
