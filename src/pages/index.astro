@@ -155,6 +155,8 @@ let currentIdx = 0;
 
 function renderLightbox() {
   const photo = currentPhotos[currentIdx];
+  lbImg.style.opacity = '0';
+  lbImg.onload = () => { lbImg.style.opacity = '1'; };
   lbImg.src = `/piante/${photo.file}`;
   lbImg.alt = photo.name;
   lbName.textContent = photo.name;
@@ -204,6 +206,16 @@ dialog.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') { e.preventDefault(); if (currentIdx > 0) { currentIdx--; renderLightbox(); } }
   if (e.key === 'ArrowRight') { e.preventDefault(); if (currentIdx < currentPhotos.length - 1) { currentIdx++; renderLightbox(); } }
 });
+
+// Swipe mobile
+let touchStartX = 0;
+dialog.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+dialog.addEventListener('touchend', e => {
+  const delta = e.changedTouches[0].clientX - touchStartX;
+  if (Math.abs(delta) < 40) return;
+  if (delta < 0 && currentIdx < currentPhotos.length - 1) { currentIdx++; renderLightbox(); }
+  if (delta > 0 && currentIdx > 0) { currentIdx--; renderLightbox(); }
+}, { passive: true });
 </script>
 
 <style>
@@ -462,6 +474,7 @@ dialog.addEventListener('keydown', e => {
     display: block;
     user-select: none;
     image-rendering: high-quality;
+    transition: opacity 0.15s ease;
   }
 
   .lb-nav {
