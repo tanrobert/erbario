@@ -67,8 +67,8 @@ const plantDataJson = JSON.stringify(
   <header>
     <div class="header-inner">
       <div class="header-title">
-        <span class="label">Piantario personale</span>
-        <h1>Collezione di piante</h1>
+        <img src="/piantario-logo.svg" alt="" class="logo" />
+        <h1 class="sr-only">Piantario — Collezione di piante</h1>
       </div>
       <div class="header-stats">
         <div class="stat">
@@ -264,32 +264,28 @@ dialog.addEventListener('touchend', e => {
   }
 
   .header-inner {
-    max-width: 1400px;
-    margin: 0 auto;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
     gap: 24px;
   }
 
-  .label {
+  .logo {
     display: block;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 8px;
+    height: clamp(30px, 5.5vw, 46px);
+    width: auto;
   }
 
-  h1 {
-    font-family: var(--font-serif);
-    font-size: clamp(2rem, 5vw, 3.5rem);
-    font-weight: 400;
-    font-style: italic;
-    line-height: 1;
-    color: var(--text);
-    text-wrap: balance;
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .header-stats {
@@ -319,8 +315,6 @@ dialog.addEventListener('touchend', e => {
   /* ── Grid ── */
   main {
     padding: 32px 24px 64px;
-    max-width: 1400px;
-    margin: 0 auto;
   }
 
   .grid {
