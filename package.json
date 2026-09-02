@@ -1,5 +1,5 @@
 {
-  "name": "erbario",
+  "name": "piantario",
   "type": "module",
   "scripts": {
     "dev": "astro dev",
