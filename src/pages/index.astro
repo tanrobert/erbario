@@ -3,14 +3,15 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const photosDir = join(process.cwd(), 'public/piante');
+const PHOTO_EXTENSIONS = /\.(jpg|jpeg|png|webp)$/i;
 const files = readdirSync(photosDir)
-  .filter((f: string) => f.endsWith('.jpg'))
+  .filter((f: string) => PHOTO_EXTENSIONS.test(f))
   .sort();
 
 const MONTHS = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
 
 function parse(filename: string) {
-  const base = filename.replace('.jpg', '');
+  const base = filename.replace(PHOTO_EXTENSIONS, '');
   const parts = base.split('_');
   const dateIdx = parts.findIndex(p => /^\d{4}-\d{2}-\d{2}$/.test(p));
   const nameParts = parts.slice(0, dateIdx).join(' ').split('-');
